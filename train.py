@@ -38,7 +38,7 @@ from torch.nn.parallel import DistributedDataParallel as NativeDDP
 from timm import utils
 from timm.data import create_dataset, create_loader, resolve_data_config, Mixup, FastCollateMixup, AugMixDataset
 from timm.layers import convert_splitbn_model, convert_sync_batchnorm, set_fast_norm
-from timm.loss import JsdCrossEntropy, SoftTargetCrossEntropy, BinaryCrossEntropy, LabelSmoothingCrossEntropy, LogicSegLoss, HierarchicalCrossEntropy
+from timm.loss import JsdCrossEntropy, SoftTargetCrossEntropy, BinaryCrossEntropy, LabelSmoothingCrossEntropy, LogicSegLoss, HierarchicalCrossEntropy, TaxonomicLoss
 from timm.models import create_model, safe_model_name, resume_checkpoint, load_checkpoint, model_parameters
 from timm.optim import create_optimizer_v2, optimizer_kwargs
 from timm.scheduler import create_scheduler_v2, scheduler_kwargs
@@ -350,6 +350,8 @@ group.add_argument('--logicseg-method', default="bce",
                    help='Set the loss used to compute the error between ouput and target (ce, bce, asl, multi_bce).')
 group.add_argument('--csv-tree', default=None,
                    help='path to csv describing the tree structure of the labels.')
+group.add_argument('--tax-loss', action='store_true', default=False,
+                   help="Elable Taxonomic loss.")
 
 # The following arguments are for implemented this way to facilitate testing, they might change in the future
 group.add_argument('--crule-loss-weight', type=float, default=0.2,
@@ -697,7 +699,7 @@ def main():
         input_img_mode = args.input_img_mode
 
     # If logicSeg is used we create the class map file just before creating the dataset
-    if args.logicseg:
+    if args.logicseg or args.tax_loss:
         create_class_to_labels(args.csv_tree, args.class_map, verbose=False)
 
     dataset_train = create_dataset(
@@ -830,16 +832,6 @@ def main():
                 img_dtype=model_dtype or torch.float32,
                 **data_config,
             )
-    elif args.logicseg:
-        loader_eval = create_loader(
-            dataset_eval,
-            batch_size=args.batch_size,
-            use_prefetcher=True,
-            num_workers=eval_workers,
-            device=device,
-            img_dtype=model_dtype or torch.float32,
-            **data_config,
-        )
 
     validate_loss_fn = nn.CrossEntropyLoss().to(device=device)
     # setup loss function
@@ -853,6 +845,11 @@ def main():
     elif args.hce_loss:
         L, h = get_hce_tree_data(args.csv_tree)
         train_loss_fn = HierarchicalCrossEntropy(L, alpha=args.hce_alpha, h=h)
+        validate_loss_fn = HierarchicalCrossEntropy(L, alpha=args.hce_alpha, h=h)
+    elif args.tax_loss:
+        layers, parents = get_node_to_index_layer(args.csv_tree)
+        La_raw = get_layer_matrix(args.csv_tree)
+        train_loss_fn = TaxonomicLoss(La_raw, layers, parents, [0.25, 0.25, 0.25, 0.15, 0.10], device=device)
     elif args.jsd_loss:
         assert num_aug_splits > 1  # JSD only valid with aug splits set
         train_loss_fn = JsdCrossEntropy(num_splits=num_aug_splits, smoothing=args.smoothing)
@@ -958,7 +955,7 @@ def main():
     results = []
     try:
         label_matrix = None
-        if args.logicseg:
+        if args.logicseg or args.tax_loss:
             label_matrix, _, _ = get_label_matrix(args.csv_tree)
 
         for epoch in range(start_epoch, num_epochs):
@@ -1146,6 +1143,8 @@ def train_one_epoch(
             with amp_autocast():
                 output = model(input)
                 loss = loss_fn(output, target)
+                # print("output", output)
+                # print("target", target)
                 # compute the accuracy on the training data of the current batch
                 if args.logicseg:
                     if last_batch:
@@ -1337,8 +1336,10 @@ def validate(
                 if reduce_factor > 1:
                     output = output.unfold(0, reduce_factor, reduce_factor).mean(dim=2)
                     target = target[0:target.size(0):reduce_factor]
-
-                loss = loss_fn(output, target)
+                if args.tax_loss:
+                    loss = loss_fn(output, target.float())
+                else:
+                    loss = loss_fn(output, target)
 
             if args.logicseg:
                 if last_batch:

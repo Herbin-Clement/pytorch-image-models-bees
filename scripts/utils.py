@@ -125,8 +125,8 @@ def create_dataset_test(classes_to_remove):
     """
     Create a test dataset.
     """
-    dataset_dirname = "data/small-collomboles-n-classes/dataset"
-    dataset_test_dirname = "data/small-collomboles-n-classes/dataset_test"
+    dataset_dirname = "data/small-collomboles/dataset"
+    dataset_test_dirname = "data/small-collomboles/dataset_test"
 
     copy_folder(dataset_dirname, dataset_test_dirname)
 
@@ -231,4 +231,5 @@ if __name__ == "__main__":
         "Willowsia nigromaculata",
         "Willowsia platani",
     ]
+    classes_to_remove = []
     create_dataset_test(classes_to_remove)

@@ -2,7 +2,7 @@ import json
 import time
 
 import torch
-from timm.loss import HierarchicalCrossEntropy
+from timm.loss import HierarchicalCrossEntropy, TaxonomicLoss
 from timm.loss.logicseg import multi_bce_loss
 
 from scripts.hierarchy_better_mistakes_utils import *
@@ -77,3 +77,25 @@ def test_modified_logiqseg_loss():
     loss2 = loss_fn.forward_old(y_pred, target)
     print("Valeur de la perte 1:", loss1.item())
     print("Valeur de la perte 2:", loss2.item())
+
+def test_taxonomic_loss():
+    """
+    Test multi BCE loss of logicseg.
+    """
+    tree_filename = "data/small-collomboles/hierarchy_test.csv"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    layers, parents = get_node_to_index_layer(tree_filename)
+    La_raw = get_layer_matrix(tree_filename)
+
+    loss_fn = TaxonomicLoss(La_raw, layers, parents, [0.25, 0.25, 0.25, 0.15, 0.10], device=device)
+    
+    logits = torch.mul(torch.ones(2, 17), -10).to(device)
+    target = torch.zeros(2, 17).to(device)
+    logits[0,[0, 1, 2, 3, 4]] = 10
+    target[0,[0, 1, 2, 3, 4]] = 1
+    logits[1,[0, 1, 2, 3, 7]] = 10
+    target[1,[0, 1, 2, 3, 4]] = 1
+
+    y_pred = torch.sigmoid(logits)
+    loss1 = loss_fn.forward(y_pred, target)
+    print("Valeur de la perte 1:", loss1.item())

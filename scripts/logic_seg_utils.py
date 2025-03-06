@@ -3,6 +3,8 @@ import pickle
 import pandas as pd
 import torch
 
+from scripts.utils import get_parents, read_csv
+
 def get_layer_matrix(path_to_csv_tree, verbose=False):
   """
   Get layer matrix from csv.
@@ -20,8 +22,34 @@ def get_layer_matrix(path_to_csv_tree, verbose=False):
 
   if verbose:
      print(La)
+  print(node_to_index)
 
   return La
+
+def get_node_to_index_layer(path_to_csv_tree):
+  """
+  Get layer matrix from csv.
+  """
+  csv = pd.read_csv(path_to_csv_tree)
+  unique_nodes = pd.unique(csv.values.ravel())
+  unique_nodes = unique_nodes[~pd.isnull(unique_nodes)]  # On enlève les NaN au cas ou
+  node_to_index = {node: idx for idx, node in enumerate(unique_nodes)}
+  layers = [[] for i in range(len(csv.columns))]
+  for _, row in csv.iterrows():
+     for layer, node in enumerate(row):
+        if node_to_index[node] not in layers[layer]:
+          layers[layer].append(node_to_index[node])
+
+  hierarchy_lines = read_csv(path_to_csv_tree)
+  hierarchy_lines_without_names = hierarchy_lines[1:]
+  parents = get_parents(hierarchy_lines_without_names)
+  parents = {node_to_index[key]: node_to_index[value] for key, value in parents.items()}
+  n = max(parents.keys()) + 1
+  parents_matrix = np.zeros((n, n))
+  for child, parent in parents.items():
+     parents_matrix[child, parent] = 1
+
+  return layers, parents_matrix
 
 def get_tree_matrices(path_to_csv_tree, verbose=False):
   """
